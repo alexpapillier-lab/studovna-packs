@@ -59,6 +59,10 @@ details.gwhy[open]>div{margin:4px 0}
 .gd-toast button{background:transparent;color:var(--bg);border:1.5px solid color-mix(in srgb,var(--bg) 55%,transparent);border-radius:8px;padding:4px 12px;min-height:34px;font-size:.85rem}
 .gd-exhdr{margin-bottom:8px}
 .gd-excl li .gd-restore{margin-top:8px;border-radius:99px;padding:4px 14px;min-height:34px;font-size:.84rem}
+.gd-tune{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.gd-tune-i{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;color:var(--fg);min-height:38px}
+.gd-tune-i input{width:56px;font:inherit;font-size:.95rem;text-align:center;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);min-height:38px}
+.gbtns.gtri{grid-template-columns:1fr 1fr}
 .foot{margin-top:28px;color:var(--muted);font-size:.82rem}
 /* smart drill v2 */
 #drillbox [hidden]{display:none!important}
@@ -136,7 +140,7 @@ i.m{background:var(--good)} i.p{background:var(--t3)} i.u{background:var(--sunk)
 </style></head>
 <body><div class="wrap">
 <h1>Chirurgie zápočet – procvičování</h1>
-<p class="lead"><b>813 otázek</b> ze sady na Quizletu (824 karet, 11 úplných duplicit sloučeno): 622 s výběrem odpovědi, 191 kartiček (otázka → odpověď). Každá odpověď je zároveň <b>co</b> a <b>jak jistě</b>: jisté chyby se vrací nejdřív, tipnutí se počítá jako „neumím“, co umíš, se jednou zkontroluje na konci. Otázka je zvládnutá po dvou jistých správných odpovědích s odstupem – a pak se ještě vrací ke kontrole po 1, 3, 7… dnech, takže Chytré učení nikdy „nedojde“.</p>
+<p class="lead"><b>813 otázek</b> ze sady na Quizletu (824 karet, 11 úplných duplicit sloučeno): 622 s výběrem odpovědi, 191 kartiček (otázka → odpověď). Chytré učení si nastavíš sama: <b>kolikrát</b> chceš každou otázku správně zodpovědět, než ji bere jako hotovou, a <b>po kolika otázkách</b> se mají vracet ty, co jsi měla špatně. Správné otázky tak projdeš, špatné se mezitím připomínají. Otázku, kterou nechceš, <b>vyřadíš</b> tlačítkem ⊘ – přestane se objevovat a projdeš/vrátíš si ji v režimu <b>Vyřazené</b>.</p>
 <section id="drill"><div class="drill" id="drillbox"></div></section>
 <p class="foot">Data jsou převzatá beze změn ze sady „Chirurgie zápočet“ (824 karet). U otázek, kde sada uvádí jen správnou odpověď bez možností nebo odpověď neodpovídá možnostem, se ukáže celá odpověď jako kartička. Vysvětlení u odpovědí nejsou součástí sady – jsou doplněná a mohou obsahovat chyby; u ⚠ je odpověď v sadě sporná, při rozporu platí učebnice a přednášky. Postup se ukládá v tomto zařízení.</p>
 </div>
@@ -209,6 +213,11 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
 
   function createEngine(opts) {
     const TFQ = opts.TFQ, CHAP = opts.CHAP;
+    // Optional simple, user-tunable scheduler (chirurgie). When absent, the original spaced scheduler is used.
+    //   cfg.passes   = how many correct answers a question needs before it is done (stops coming back)
+    //   cfg.wrongGap = how many cards later a wrong (or not-yet-finished) question comes back
+    // The object is read live on every answer, so changing its fields re-tunes the drill without a rebuild.
+    const cfg = opts.cfg || null;
     const rand = opts.random || Math.random;
     const now = opts.now || (() => Date.now());
     const Q = {}; TFQ.forEach(([n, t, a]) => { Q[n] = { n, t, a: a ? 1 : 0 }; });
@@ -240,6 +249,24 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       const k = (correct ? 'S' : 'W') + (sure ? 'S' : 'G');
       s.k = k;
       let boosted = [];
+
+      if (cfg) {
+        // Simple tunable rule: any correct answer counts as a pass; only wrong answers (and not-yet-finished
+        // ones) come back, cfg.wrongGap cards later. Sure/guess does not change the schedule here.
+        const passes = Math.max(1, cfg.passes | 0 || 1), wgap = Math.max(1, cfg.wrongGap | 0 || 1);
+        if (correct) {
+          s.p = (s.p || 0) + 1; s.s = (s.s || 0) + 1; s.ls = seq;
+          if (s.p >= passes) { s.m = 1; s.pm = 0; s.cat = null; s.due = 0; }
+          else { s.m = 0; s.pm = 1; s.cat = 'chk'; s.due = seq + wgap; }
+        } else {
+          s.bad = 1; s.s = 0; s.m = 0; s.pm = 0; s.bt = now();
+          if (k === 'WS') s.om = 1;
+          s.cat = s.om ? 'om' : 'err';
+          s.due = seq + wgap;
+        }
+        s.u = now(); meta.last = n; meta.u = now();
+        return { correct, k, item: s, boosted };
+      }
 
       if (k === 'SS') {
         if (first) {
@@ -452,7 +479,9 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   const all = QZ.map(i => i.n);
 
   let items = load(KEY) || {}, meta = load(MKEY) || {};
-  let prefs = Object.assign({ shuffle: false, kind: 'all' }, load(PKEY) || {});
+  let prefs = Object.assign({ shuffle: false, kind: 'all', passes: 2, wrongGap: 10 }, load(PKEY) || {});
+  prefs.passes = Math.max(1, Math.min(9, prefs.passes | 0 || 2));
+  prefs.wrongGap = Math.max(1, Math.min(99, prefs.wrongGap | 0 || 10));
   /* Personal notes per question: { n: { t: text, u: timestamp } } (timestamped so a sync keeps the newer one). */
   let notes = load(NKEY) || {};
   const noteOf = n => (notes[n] && notes[n].t) || '';
@@ -484,7 +513,9 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   const daysSince = n => Math.floor((Date.now() - (E.items[n].u || 0)) / DAY);
   let snap = load(SKEY);
   if (!snap || snap.day !== today()) { snap = { day: today(), u: Date.now(), items: JSON.parse(JSON.stringify(items)), meta: JSON.parse(JSON.stringify(meta)) }; store(SKEY, snap); }
-  let E = GPDrillEngine.createEngine({ TFQ, CHAP, items, meta });
+  // Live config object the engine reads on every answer; updated in place when the settings change.
+  const cfg = { passes: prefs.passes, wrongGap: prefs.wrongGap };
+  let E = GPDrillEngine.createEngine({ TFQ, CHAP, items, meta, cfg });
   const save = () => { store(KEY, E.items); store(MKEY, E.meta); };
   save();
 
@@ -493,7 +524,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   let picked = null, order = null, revealed = false, isReview = false, guess = false;
 
   /* ---------- layout ---------- */
-  const MODES = [['smart', 'Chytré učení'], ['weak', 'Jen moje slabiny'], ['morning', 'Včerejší chyby'], ['chapter', 'Kapitoly'], ['triage', 'Projít a vyřadit'], ['exam', 'Zkouška nanečisto']];
+  const MODES = [['smart', 'Chytré učení'], ['weak', 'Jen moje slabiny'], ['morning', 'Včerejší chyby'], ['chapter', 'Kapitoly'], ['triage', 'Projít a vyřadit'], ['exclview', 'Vyřazené'], ['exam', 'Zkouška nanečisto']];
   box.innerHTML = `
     <div class="gd-sum" id="gdSum"></div>
     <div class="gd-modes" role="tablist">${MODES.map(([k, l]) => `<button type="button" data-m="${k}">${l}</button>`).join('')}</div>
@@ -503,6 +534,10 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       <div class="gd-kind" id="gdKind" role="radiogroup"><span>Otázky:</span>
         <button type="button" data-k="all">všechny</button><button type="button" data-k="mcq">jen a)–d)</button><button type="button" data-k="open">jen kartičky</button>
       </div>
+    </div>
+    <div class="gd-tune" title="Platí pro Chytré učení, Slabiny, Kapitoly i Vyřazené">
+      <label class="gd-tune-i">Správně zodpovědět každou otázku <input type="number" id="gdPasses" min="1" max="9" step="1"> ×, pak hotovo</label>
+      <label class="gd-tune-i">Špatné vracet po <input type="number" id="gdGap" min="1" max="99" step="1"> otázkách</label>
     </div>
     <div id="gdCard"></div>
     <details class="gd-ov" id="gdOv"><summary>Přehled, chyby a kalibrace</summary><div id="gdOvBody"></div></details>`;
@@ -517,6 +552,12 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   $('gdShuffle').checked = !!prefs.shuffle;
   $('gdShuffle').onchange = () => { prefs.shuffle = $('gdShuffle').checked; store(PKEY, prefs); if (cur != null && !answered) { order = null; picked = null; paintCard(); } };
 
+  // Two tunables for how learning schedules questions; applied live to the engine's config.
+  $('gdPasses').value = prefs.passes; $('gdGap').value = prefs.wrongGap;
+  const clampVal = (el, lo, hi, def) => { let v = parseInt(el.value, 10); if (!(v >= lo && v <= hi)) v = Math.max(lo, Math.min(hi, v || def)); el.value = v; return v; };
+  $('gdPasses').onchange = () => { prefs.passes = cfg.passes = clampVal($('gdPasses'), 1, 9, 2); store(PKEY, prefs); paintSummary(); };
+  $('gdGap').onchange = () => { prefs.wrongGap = cfg.wrongGap = clampVal($('gdGap'), 1, 99, 10); store(PKEY, prefs); };
+
   function paintKind() { $('gdKind').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.k === prefs.kind)); }
   $('gdKind').querySelectorAll('button').forEach(b => b.onclick = () => {
     prefs.kind = b.dataset.k; store(PKEY, prefs); paintKind();
@@ -525,9 +566,10 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   paintKind();
 
   function pool() {
-    const p = ui.mode === 'chapter' ? ui.chapters.flatMap(c => CHAP[c] || []) : all;
+    // "Vyřazené" mode drills exactly the excluded questions; every other mode leaves them out.
+    const p = ui.mode === 'exclview' ? all.filter(isExcl) : (ui.mode === 'chapter' ? ui.chapters.flatMap(c => CHAP[c] || []) : all);
     const q = prefs.kind === 'all' ? p : p.filter(n => BY[n].t === (prefs.kind === 'mcq' ? 'm' : 'o'));
-    return q.filter(n => !isExcl(n));   // questions taken out of learning never appear
+    return ui.mode === 'exclview' ? q : q.filter(n => !isExcl(n));
   }
 
   function setMode(m) {
@@ -616,7 +658,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     it = JSON.parse(JSON.stringify(it)); me = JSON.parse(JSON.stringify(me));
     all.forEach(n => { if (!it[n]) it[n] = { a: 0, c: 0, w: 0, s: 0, ls: -1, bad: 0, om: 0, pm: 0, m: 0, k: '', cat: null, due: 0, seen: -1, bt: 0, bo: 0, u: t }; else it[n].u = t; });
     me.u = t;
-    E = GPDrillEngine.createEngine({ TFQ, CHAP, items: it, meta: me });
+    E = GPDrillEngine.createEngine({ TFQ, CHAP, items: it, meta: me, cfg });
     snap = { day: today(), u: Date.now(), items: JSON.parse(JSON.stringify(E.items)), meta: JSON.parse(JSON.stringify(E.meta)) };
     store(SKEY, snap); save(); setMode('smart');
   }
@@ -646,18 +688,20 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     if (queue) n = queue.length ? queue[0] : null;
     else {
       const mode = ui.mode === 'weak' ? 'weak' : 'smart';
-      // Every 4th card is a day-spaced check of something already mastered, when one is due.
-      if (mode === 'smart' && E.meta.seq % 4 === 3) n = pickReview(p, false);
+      // Legacy scheduler: every 4th card re-checks a mastered one that is due by day. With the simple config the
+      // user controls repetition through the two settings, so there is no day-spaced re-check and the pass ends.
+      if (!cfg && mode === 'smart' && E.meta.seq % 4 === 3) n = pickReview(p, false);
       // Siblings (the same question asked again elsewhere in the set) never come right after each other.
       if (n == null) { const apart = p.filter(x => !sibs(E.meta.last).includes(x)); n = E.next(apart, mode); if (n == null && apart.length !== p.length) n = E.next(p, mode); }
-      // Everything mastered: keep going with checks of the least recently answered cards – smart mode never ends.
-      if (n == null && mode === 'smart') { n = pickReview(p, true); }
+      // Legacy only: everything mastered → keep re-checking the least recently answered, so smart mode never ends.
+      if (n == null && !cfg && mode === 'smart') { n = pickReview(p, true); }
       isReview = n != null && !!(E.items[n] && E.items[n].m);
     }
     if (n == null) return done();
     cur = n; shownAt = Date.now();
-    // First attempt at a question starts as "tipuju" (she can switch it off); not in the mock exam, which counts only sure answers.
-    guess = !exam && !E.has(n);
+    // First attempt starts as "tipuju" in the legacy scheduler; with the simple config the confidence does not
+    // affect scheduling, so the toggle is dropped and answers are taken as given.
+    guess = !cfg && !exam && !E.has(n);
     paintCard();
   }
 
@@ -666,8 +710,11 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const n = cur, i = BY[n], it = E.items[n];
     const tag = isReview ? [daysSince(n) ? `kontrola po ${daysSince(n)} ${daysSince(n) === 1 ? 'dni' : 'dnech'}` : 'kontrola', 'chk'] : !it || !it.a ? ['nové', 'new'] : (TAG[it.cat] || ['opakování', 'chk']);
     const prog = queue ? `${queueTotal - queue.length + 1} / ${queueTotal}` : '';
-    // "Take out of learning": hidden in the mock exam, where cards fly by and there is no place to undo.
-    const exclHTML = exam ? '' : `<button type="button" class="gexcl" id="gdExcl" title="Otázka se přestane objevovat v chytrém učení; vrátit ji jde v přehledu">⊘ Vyřadit z učení</button>`;
+    // Corner button: in the "Vyřazené" mode it brings the question back; elsewhere it takes it out of learning.
+    // Hidden in the mock exam, where cards fly by and there is no place to undo.
+    const exclHTML = exam ? '' : (ui.mode === 'exclview'
+      ? `<button type="button" class="gexcl" id="gdExcl" title="Vrátit otázku zpět do chytrého učení">↩︎ Vrátit do učení</button>`
+      : `<button type="button" class="gexcl" id="gdExcl" title="Otázka se přestane objevovat v chytrém učení; vrátit ji jde v přehledu nebo v režimu Vyřazené">⊘ Vyřadit z učení</button>`);
     if (i.t === 'm') {
       // Display order: shuffled when the preference is on; letters are re-assigned so the card always reads a)–d).
       if (!order) order = prefs.shuffle ? shuffled(i.o.map((_, x) => x)) : i.o.map((_, x) => x);
@@ -676,11 +723,11 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
         <div class="gcard">
           <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${noteOf(n) ? ' · 📝' : ''}</span><span>${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
           <div class="gst">${nl(i.q)}</div>
-          <button type="button" class="gguess${guess ? ' on' : ''}" id="gdGuess">${guess ? '✓ Tipuju – odpověď se počítá jako neumím' : 'Tipuju (nejsem si jistá)'}<kbd></kbd></button>
+          ${cfg ? '' : `<button type="button" class="gguess${guess ? ' on' : ''}" id="gdGuess">${guess ? '✓ Tipuju – odpověď se počítá jako neumím' : 'Tipuju (nejsem si jistá)'}<kbd></kbd></button>`}
           <div class="gopts">${opts}</div>
           <div class="gslot"></div>
         </div>`;
-      $('gdGuess').onclick = toggleGuess;
+      if ($('gdGuess')) $('gdGuess').onclick = toggleGuess;
       cardEl.querySelectorAll('.gopt').forEach(b => b.onclick = () => pick(b.dataset.k));
     } else {
       cardEl.innerHTML = `
@@ -691,7 +738,19 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
         </div>`;
       $('gdReveal').onclick = reveal;
     }
-    const xb = $('gdExcl'); if (xb) xb.onclick = excludeCurrent;
+    const xb = $('gdExcl'); if (xb) xb.onclick = ui.mode === 'exclview' ? restoreCurrent : excludeCurrent;
+  }
+
+  /* In the "Vyřazené" mode: bring the current question back into learning and move on. */
+  function restoreCurrent() {
+    if (cur == null) return;
+    const n = cur;
+    setExcl(n, false);
+    if ($('gdOv') && $('gdOv').open) paintOverview();
+    toast(`Otázka #${n} vrácena do chytrého učení.`, 'Vyřadit znovu', () => {
+      setExcl(n, true); paintSummary(); if ($('gdOv') && $('gdOv').open) paintOverview();
+    });
+    nextCard();
   }
 
   /* Take the current question out of smart learning: mark it, drop it from any running queue, move on,
@@ -767,12 +826,15 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     cardEl.querySelector('.gslot').innerHTML = `
       <div class="gv ans"><b>Odpověď</b>${answerHTML(i)}</div>
       ${whyHTML(cur)}
-      <div class="gbtns grate">
+      ${cfg ? `<div class="gbtns gtri">
+        <button type="button" class="t" data-r="ss"><b>Uměla jsem</b><span>počítá se jako správně</span><kbd>1</kbd></button>
+        <button type="button" class="f" data-r="wg"><b>Neuměla jsem</b><span>vrátí se</span><kbd>2</kbd></button>
+      </div>` : `<div class="gbtns grate">
         <button type="button" class="t" data-r="ss"><b>Uměla jsem</b><span>jistě</span><kbd>1</kbd></button>
         <button type="button" class="t g" data-r="sg"><b>Napůl</b><span>počítá se jako neumím</span><kbd>2</kbd></button>
         <button type="button" class="f" data-r="wg"><b>Neuměla jsem</b><span></span><kbd>3</kbd></button>
-      </div>`;
-    cardEl.querySelectorAll('.grate button').forEach(b => b.onclick = () => rate(b.dataset.r));
+      </div>`}`;
+    cardEl.querySelectorAll('.gbtns button[data-r]').forEach(b => b.onclick = () => rate(b.dataset.r));
   }
   function rate(r) {
     if (answered || cur == null) return;
@@ -787,7 +849,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const n = cur, i = BY[n];
     const wasMastered = !!(E.items[n] && E.items[n].m);
     const r = E.answer(n, correct, sure, E.othersOpen(pool(), n));
-    if (wasMastered) r.item.rv = r.k === 'SS' ? (r.item.rv || 0) + 1 : 0;   // passed a day-spaced check → next gap longer; failed → back to learning
+    if (wasMastered) r.item.rv = (cfg ? r.correct : r.k === 'SS') ? (r.item.rv || 0) + 1 : 0;   // passed a day-spaced check → next gap longer; failed → back to learning
     if (r.k !== 'SS') sibs(n).forEach(x => { if (!E.has(x)) { E.item(x).bo = E.meta.seq; E.item(x).u = Date.now(); } });   // the same question elsewhere comes soon
     if (queue) queue.shift();
     save();
@@ -802,15 +864,18 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const ans = i.t === 'm' ? `Správně je <span class="gans">${answerHTML(i)}</span>` : '';
     let html;
     const why = i.t === 'm' ? whyHTML(n, r.k !== 'SS') : '';
-    if (r.k === 'SS') html = `<div class="gv ok"><b>✓ Správně</b>${i.f ? answerHTML(i) : ''}${why}</div>`;
+    if (cfg) html = r.correct
+      ? `<div class="gv ok"><b>✓ Správně</b>${i.f ? answerHTML(i) : ''}${why}</div>`
+      : `<div class="gv no"><b>✗ Špatně</b>${ans}${why}</div>`;
+    else if (r.k === 'SS') html = `<div class="gv ok"><b>✓ Správně</b>${i.f ? answerHTML(i) : ''}${why}</div>`;
     else if (r.k === 'WS') html = `<div class="gv om"><b>⚠ Nebezpečný omyl – jistota, a přitom špatně.</b>${ans}${why}</div>`;
     else if (r.k === 'SG') html = `<div class="gv tip"><b>Správně, ale tipnuté – počítá se jako neumím.</b>${ans}${why}</div>`;
     else html = `<div class="gv no"><b>✗ Špatně</b>${ans}${why}</div>`;
-    if (i.t === 'm') slot.innerHTML = html + noteBox(n) + `<button type="button" class="pri gnext">${r.k === 'WS' ? 'Chápu' : 'Další'} ⏎</button>`;
+    if (i.t === 'm') slot.innerHTML = html + noteBox(n) + `<button type="button" class="pri gnext">${!cfg && r.k === 'WS' ? 'Chápu' : 'Další'} ⏎</button>`;
     else slot.insertAdjacentHTML('beforeend', noteBox(n) + `<button type="button" class="pri gnext">Další ⏎</button>`);
     wireNote(slot, n);
     const nb = slot.querySelector('.gnext'); nb.onclick = nextCard; nb.focus({ preventScroll: true });
-    if (r.k === 'SS' && i.t === 'm' && !warnOf(n)) { const mine = cardSerial; autoT = setTimeout(() => { if (cardSerial === mine) nextCard(); }, 1400); }
+    if ((cfg ? r.correct : r.k === 'SS') && i.t === 'm' && !warnOf(n)) { const mine = cardSerial; autoT = setTimeout(() => { if (cardSerial === mine) nextCard(); }, 1400); }
     const wd = slot.querySelector('details.gwhy'); if (wd) wd.addEventListener('toggle', () => clearTimeout(autoT));
     paintSummary();
   }
@@ -824,6 +889,16 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
         <p class="gd-muted">Z chytrého učení je teď vyřazeno celkem ${nEx} ${w(nEx, 'otázka', 'otázky', 'otázek')}. Zobrazit a vrátit je můžeš v přehledu „Přehled, chyby a kalibrace“.</p>
         <button type="button" class="pri" id="gdBack">Zpět na chytré učení</button></div>`;
       triage = false; queue = null;
+      $('gdBack').onclick = () => setMode('smart');
+      paintSummary();
+      return;
+    }
+    if (ui.mode === 'exclview') {
+      const nEx = all.filter(isExcl).length;
+      const msg = nEx ? 'Vyřazené otázky máš pro teď projité. Vrátit je můžeš tlačítkem ↩︎ u otázky nebo v přehledu.'
+        : 'Nemáš žádné vyřazené otázky. Vyřadíš je tlačítkem „⊘ Vyřadit z učení“ u otázky.';
+      cardEl.innerHTML = `<div class="gcard done"><div class="gst">${msg}</div><button type="button" class="pri" id="gdBack">Zpět na chytré učení</button></div>`;
+      queue = null;
       $('gdBack').onclick = () => setMode('smart');
       paintSummary();
       return;
@@ -863,17 +938,18 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     }
     if (!answered && i.t === 'm') {
       if (k in NUM) { const b = cardEl.querySelectorAll('.gopt')[NUM[k]]; if (b) { e.preventDefault(); pick(b.dataset.k); } }
-      else if (k === ' ' || k === 'g') { e.preventDefault(); toggleGuess(); }
+      else if (!cfg && (k === ' ' || k === 'g')) { e.preventDefault(); toggleGuess(); }
     } else if (!answered && i.t === 'o') {
       if (!revealed && (k === 'enter' || k === ' ')) { e.preventDefault(); reveal(); }
       else if (revealed && (k === '1' || k === '+')) { e.preventDefault(); rate('ss'); }
-      else if (revealed && (k === '2' || k === 'ě')) { e.preventDefault(); rate('sg'); }
-      else if (revealed && (k === '3' || k === 'š')) { e.preventDefault(); rate('wg'); }
+      else if (revealed && cfg && (k === '2' || k === 'ě')) { e.preventDefault(); rate('wg'); }
+      else if (revealed && !cfg && (k === '2' || k === 'ě')) { e.preventDefault(); rate('sg'); }
+      else if (revealed && !cfg && (k === '3' || k === 'š')) { e.preventDefault(); rate('wg'); }
     } else if (answered && (k === 'enter' || k === ' ')) { e.preventDefault(); nextCard(); }
   });
 
   paintModes();
-  setMode(ui.mode === 'exam' || ui.mode === 'morning' || ui.mode === 'triage' ? 'smart' : ui.mode);
+  setMode(['exam', 'morning', 'triage', 'exclview'].includes(ui.mode) ? 'smart' : ui.mode);
 })();
 
 </script>
