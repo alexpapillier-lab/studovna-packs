@@ -627,6 +627,8 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     }
     if (n == null) return done();
     cur = n; shownAt = Date.now();
+    // First attempt at a question starts as "tipuju" (she can switch it off); not in the mock exam, which counts only sure answers.
+    guess = !exam && !E.has(n);
     paintCard();
   }
 
