@@ -51,6 +51,14 @@ details.gwhy[open] summary{margin-bottom:6px}
 details.gwhy[open]>div{margin:4px 0}
 .gwarn{margin-top:10px;padding:8px 10px;border-radius:8px;font-size:.9rem;background:color-mix(in srgb,var(--t3) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--t3) 50%,var(--line));color:var(--fg)}
 .gd-om li .gwhy{font-size:.86rem}
+.gqn>span:last-child{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.gexcl{border-radius:99px;border-style:dashed;padding:4px 12px;min-height:30px;font-size:.78rem;line-height:1;color:var(--muted);text-transform:none;letter-spacing:0}
+.gexcl:hover{color:var(--bad);border-color:var(--bad)}
+.gd-toast{position:sticky;bottom:12px;margin-top:12px;display:none;align-items:center;gap:12px;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:10px;font-size:.9rem;box-shadow:0 4px 18px rgba(0,0,0,.2)}
+.gd-toast.on{display:flex}
+.gd-toast button{background:transparent;color:var(--bg);border:1.5px solid color-mix(in srgb,var(--bg) 55%,transparent);border-radius:8px;padding:4px 12px;min-height:34px;font-size:.85rem}
+.gd-exhdr{margin-bottom:8px}
+.gd-excl li .gd-restore{margin-top:8px;border-radius:99px;padding:4px 14px;min-height:34px;font-size:.84rem}
 .foot{margin-top:28px;color:var(--muted);font-size:.82rem}
 /* smart drill v2 */
 #drillbox [hidden]{display:none!important}
@@ -416,7 +424,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
 (function () {
   const box = document.getElementById('drillbox');
   if (!box || typeof QZ === 'undefined') return;
-  const KEY = 'ch-mcq-v1', MKEY = 'ch-mcq-v1-meta', SKEY = 'ch-mcq-v1-snap', PKEY = 'ch-mcq-v1-prefs', NKEY = 'ch-mcq-v1-notes';
+  const KEY = 'ch-mcq-v1', MKEY = 'ch-mcq-v1-meta', SKEY = 'ch-mcq-v1-snap', PKEY = 'ch-mcq-v1-prefs', NKEY = 'ch-mcq-v1-notes', XKEY = 'ch-mcq-v1-excl';
   const load = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
   const today = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
@@ -459,6 +467,13 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     let t; ta.oninput = () => { clearTimeout(t); t = setTimeout(() => setNote(n, ta.value), 400); };
     ta.onblur = () => { clearTimeout(t); setNote(n, ta.value); };
   }
+  /* Questions the user has taken out of smart learning: { n: timestamp } (timestamped like notes so a sync
+     keeps the newer state). Excluded questions never show up in any practice mode; they can be seen and
+     brought back in the overview. The mark is permanent – it lives in localStorage like the rest of the state. */
+  let excl = load(XKEY) || {};
+  const isExcl = n => !!excl[n];
+  function setExcl(n, on) { if (on) excl[n] = Date.now(); else if (excl[n]) delete excl[n]; store(XKEY, excl); }
+  const active = () => all.filter(n => !isExcl(n));   // the questions still in play
   if (prefs.cards === false) { prefs.kind = 'mcq'; delete prefs.cards; }   // older preference
   const SIBS = typeof SIB !== 'undefined' ? SIB : {};
   const sibs = n => SIBS[n] || [];
@@ -474,11 +489,11 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   save();
 
   const ui = { mode: E.meta.mode || 'smart', chapters: E.meta.chapters || Object.keys(CHAP).slice(0, 1) };
-  let cur = null, answered = false, shownAt = 0, autoT = null, queue = null, exam = null, queueTotal = 0;
+  let cur = null, answered = false, shownAt = 0, autoT = null, queue = null, exam = null, queueTotal = 0, triage = false;
   let picked = null, order = null, revealed = false, isReview = false, guess = false;
 
   /* ---------- layout ---------- */
-  const MODES = [['smart', 'Chytré učení'], ['weak', 'Jen moje slabiny'], ['morning', 'Včerejší chyby'], ['chapter', 'Kapitoly'], ['exam', 'Zkouška nanečisto']];
+  const MODES = [['smart', 'Chytré učení'], ['weak', 'Jen moje slabiny'], ['morning', 'Včerejší chyby'], ['chapter', 'Kapitoly'], ['triage', 'Projít a vyřadit'], ['exam', 'Zkouška nanečisto']];
   box.innerHTML = `
     <div class="gd-sum" id="gdSum"></div>
     <div class="gd-modes" role="tablist">${MODES.map(([k, l]) => `<button type="button" data-m="${k}">${l}</button>`).join('')}</div>
@@ -511,14 +526,18 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
 
   function pool() {
     const p = ui.mode === 'chapter' ? ui.chapters.flatMap(c => CHAP[c] || []) : all;
-    return prefs.kind === 'all' ? p : p.filter(n => BY[n].t === (prefs.kind === 'mcq' ? 'm' : 'o'));
+    const q = prefs.kind === 'all' ? p : p.filter(n => BY[n].t === (prefs.kind === 'mcq' ? 'm' : 'o'));
+    return q.filter(n => !isExcl(n));   // questions taken out of learning never appear
   }
 
   function setMode(m) {
     ui.mode = m; E.meta.mode = m; save();
-    queue = null; exam = null; cur = null;
+    queue = null; exam = null; triage = false; cur = null;
     if (m === 'exam') { queue = E.examQueue(pool(), 40); exam = { tot: queue.length, ok: 0, miss: [] }; queueTotal = queue.length; }
-    if (m === 'morning') { queue = E.morningQueue(all, 36); queueTotal = queue.length; }
+    if (m === 'morning') { queue = E.morningQueue(active(), 36); queueTotal = queue.length; }
+    // Triage: one pass over the questions still in learning (respects the a)–d)/kartičky filter), each shown once
+    // with its answer, to decide per question whether to take it out of smart learning.
+    if (m === 'triage') { queue = pool().slice(); triage = true; queueTotal = queue.length; }
     paintModes(); nextCard();
   }
   function paintModes() {
@@ -533,19 +552,19 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const t = E.meta.today; return t && t.d === today() ? t : { d: today(), n: 0, ok: 0, ms: 0 };
   }
   function paintSummary() {
-    const s = E.stats();
+    const s = E.stats(active());
     const t = todayStats();
     $('gdSum').innerHTML = `
       <div class="gd-big"><b>${s.mastered}</b><span>/ ${s.total} zvládnuto</span></div>
       <div class="gd-bar"><i class="m" style="width:${s.mastered / s.total * 100}%"></i><i class="p" style="width:${(s.progress + s.almost) / s.total * 100}%"></i></div>
-      <div class="gd-meta"><span>zbývá ${s.remaining}</span><span>téměř zvládnuto ${s.almost}</span><span>rozpracováno ${s.progress}</span><span>neviděno ${s.unseen}</span><span>k zopakování dnes ${all.filter(reviewDue).length}</span><span>odhad ~${fmtTime(s.estMs)}</span></div>
+      <div class="gd-meta"><span>zbývá ${s.remaining}</span><span>téměř zvládnuto ${s.almost}</span><span>rozpracováno ${s.progress}</span><span>neviděno ${s.unseen}</span><span>k zopakování dnes ${active().filter(reviewDue).length}</span><span>odhad ~${fmtTime(s.estMs)}</span></div>
       <div class="gd-today">Dnes: <b>${t.n}</b> odpovědí${t.n ? ` · <b>${Math.round(t.ok / t.n * 100)} %</b> správně · <b>${fmtTime(t.ms)}</b>` : ''}</div>
       ${s.sureN >= 15 && s.sureAcc < 0.9 ? `<div class="gd-warn">Přeceňuješ se: u „jistě“ máš jen ${Math.round(s.sureAcc * 100)} % správně. Dávej víc „tipuju“.</div>` : ''}`;
     if ($('gdOv').open) paintOverview();
   }
   const answerHTML = i => !i.a.trim() && i.t !== 'm' ? '<span class="gd-muted">(v sadě bez odpovědi)</span>' : i.t === 'm' ? `<b>${esc(i.k)})</b> ${esc((i.o.find(o => o[0] === i.k) || [])[1] || '')}${i.f ? `<div class="gd-muted">Celá odpověď v sadě: ${nl(i.a)}</div>` : ''}` : nl(i.a);
   function paintOverview() {
-    const s = E.stats();
+    const s = E.stats(active());
     const bars = Object.keys(CHAP).map(c => {
       const ch = s.chapters[c], t = ch.total;
       return `<div class="gd-ch"><span class="n">${esc(CHN[c])}</span>
@@ -553,7 +572,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
         <span class="v">${ch.m}/${t}</span></div>`;
     }).join('');
     const pct = v => v == null ? '–' : Math.round(v * 100) + ' %';
-    const wrong = all.filter(n => E.has(n) && E.items[n].bad).sort((x, y) => (E.items[y].w - E.items[x].w) || (E.items[y].om - E.items[x].om));
+    const wrong = active().filter(n => E.has(n) && E.items[n].bad).sort((x, y) => (E.items[y].w - E.items[x].w) || (E.items[y].om - E.items[x].om));
     const list = wrong.map(n => {
       const i = BY[n], it = E.items[n];
       return `<li class="${it.m ? 'done' : ''}"><div class="h">#${n} ${it.om ? '<span class="gtag om">omyl</span>' : ''} ${it.w ? `${it.w}× špatně` : 'tipnuto'} ${it.m ? '<span class="ok">✓ už zvládnuto</span>' : ''}</div>
@@ -561,6 +580,8 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     }).join('');
     const noted = all.filter(n => noteOf(n));
     const noteList = noted.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">📝 ${nl(noteOf(n))}</div></li>`).join('');
+    const exNs = all.filter(isExcl).sort((x, y) => (excl[y] || 0) - (excl[x] || 0));
+    const exList = exNs.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">${answerHTML(BY[n])}</div><button type="button" class="gd-restore" data-n="${n}">↩︎ Vrátit do učení</button></li>`).join('');
     $('gdOvBody').innerHTML = `
       <div class="gd-legend"><span><i class="m"></i>zvládnuto</span><span><i class="p"></i>rozpracováno</span><span><i class="u"></i>neviděno</span></div>
       ${bars}
@@ -570,7 +591,15 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       ${list ? `<ol class="gd-om">${list}</ol>` : '<p class="gd-muted">Zatím nic.</p>'}
       <h5>Moje poznámky (${noted.length})</h5>
       ${noteList ? `<ol class="gd-om">${noteList}</ol>` : '<p class="gd-muted">Zatím žádné – poznámku přidáš u otázky po odpovědi.</p>'}
+      <h5>Vyřazené z chytrého učení (${exNs.length})</h5>
+      ${exList ? `${exNs.length > 1 ? '<div class="gd-exhdr"><button type="button" id="gdRestoreAll">Vrátit všechny do učení</button></div>' : ''}<ol class="gd-om gd-excl">${exList}</ol>` : '<p class="gd-muted">Žádné – otázku vyřadíš tlačítkem „⊘ Vyřadit z učení“ přímo u otázky.</p>'}
       <div class="gd-reset"><button type="button" id="gdResetDay">Vynulovat jen dnešní sezení</button><button type="button" id="gdResetAll" class="danger">Smazat celý postup</button></div>`;
+    $('gdOvBody').querySelectorAll('.gd-restore').forEach(b => b.onclick = () => {
+      setExcl(+b.dataset.n, false); paintOverview(); paintSummary();
+    });
+    if ($('gdRestoreAll')) confirmBtn($('gdRestoreAll'), 'Opravdu vrátit všechny? Klikni znovu', () => {
+      exNs.forEach(n => setExcl(n, false)); paintOverview(); paintSummary();
+    });
     confirmBtn($('gdResetDay'), 'Opravdu vrátit stav na začátek dne?', () => resetTo(snap.items, snap.meta));
     confirmBtn($('gdResetAll'), 'Opravdu smazat VŠECHNO? Klikni znovu', () => resetTo({}, {}));
   }
@@ -633,16 +662,19 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   }
 
   function paintCard() {
+    if (triage) return paintTriage();
     const n = cur, i = BY[n], it = E.items[n];
     const tag = isReview ? [daysSince(n) ? `kontrola po ${daysSince(n)} ${daysSince(n) === 1 ? 'dni' : 'dnech'}` : 'kontrola', 'chk'] : !it || !it.a ? ['nové', 'new'] : (TAG[it.cat] || ['opakování', 'chk']);
     const prog = queue ? `${queueTotal - queue.length + 1} / ${queueTotal}` : '';
+    // "Take out of learning": hidden in the mock exam, where cards fly by and there is no place to undo.
+    const exclHTML = exam ? '' : `<button type="button" class="gexcl" id="gdExcl" title="Otázka se přestane objevovat v chytrém učení; vrátit ji jde v přehledu">⊘ Vyřadit z učení</button>`;
     if (i.t === 'm') {
       // Display order: shuffled when the preference is on; letters are re-assigned so the card always reads a)–d).
       if (!order) order = prefs.shuffle ? shuffled(i.o.map((_, x) => x)) : i.o.map((_, x) => x);
       const opts = order.map((oi, pos) => `<button type="button" class="gopt" data-k="${esc(i.o[oi][0])}"><b>${LETTERS[pos]})</b> <span>${esc(i.o[oi][1])}</span><kbd>${pos + 1}</kbd></button>`).join('');
       cardEl.innerHTML = `
         <div class="gcard">
-          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${noteOf(n) ? ' · 📝' : ''}</span><span>${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
+          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${noteOf(n) ? ' · 📝' : ''}</span><span>${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
           <div class="gst">${nl(i.q)}</div>
           <button type="button" class="gguess${guess ? ' on' : ''}" id="gdGuess">${guess ? '✓ Tipuju – odpověď se počítá jako neumím' : 'Tipuju (nejsem si jistá)'}<kbd></kbd></button>
           <div class="gopts">${opts}</div>
@@ -653,12 +685,66 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     } else {
       cardEl.innerHTML = `
         <div class="gcard">
-          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])} · <span class="gtag">kartička</span></span><span>${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
+          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])} · <span class="gtag">kartička</span></span><span>${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
           <div class="gst">${nl(i.q)}</div>
           <div class="gslot"><button type="button" class="pri gnext" id="gdReveal">Ukázat odpověď ⏎</button></div>
         </div>`;
       $('gdReveal').onclick = reveal;
     }
+    const xb = $('gdExcl'); if (xb) xb.onclick = excludeCurrent;
+  }
+
+  /* Take the current question out of smart learning: mark it, drop it from any running queue, move on,
+     and offer a one-tap undo. The mark is saved immediately, so it survives a reload. */
+  function excludeCurrent() {
+    if (cur == null || answered) return;
+    const n = cur;
+    setExcl(n, true);
+    if (queue) { queue = queue.filter(x => x !== n); queueTotal = Math.max(0, queueTotal - 1); }
+    if ($('gdOv') && $('gdOv').open) paintOverview();
+    toast(`Otázka #${n} vyřazena z chytrého učení.`, 'Vrátit zpět', () => {
+      setExcl(n, false);
+      paintSummary(); if ($('gdOv') && $('gdOv').open) paintOverview();
+    });
+    nextCard();
+  }
+
+  /* Small transient toast with one action (used for the exclude undo). */
+  let toastT = null;
+  function toast(msg, actLabel, act) {
+    let el = $('gdToast');
+    if (!el) { el = document.createElement('div'); el.id = 'gdToast'; el.className = 'gd-toast'; box.appendChild(el); }
+    el.innerHTML = `<span>${esc(msg)}</span>${actLabel ? '<button type="button">' + esc(actLabel) + '</button>' : ''}`;
+    el.classList.add('on');
+    const hide = () => { el.classList.remove('on'); };
+    if (actLabel) el.querySelector('button').onclick = () => { act && act(); hide(); clearTimeout(toastT); };
+    clearTimeout(toastT); toastT = setTimeout(hide, 6000);
+  }
+
+  /* ---------- triage: one pass to take questions out of learning ---------- */
+  function paintTriage() {
+    const n = cur, i = BY[n];
+    const prog = `${queueTotal - queue.length + 1} / ${queueTotal}`;
+    cardEl.innerHTML = `
+      <div class="gcard">
+        <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${i.t === 'o' ? ' · <span class="gtag">kartička</span>' : ''}${noteOf(n) ? ' · 📝' : ''}</span><span>triáž · ${prog}</span></div>
+        <div class="gst">${nl(i.q)}</div>
+        <div class="gv ans"><b>Odpověď</b>${answerHTML(i)}</div>
+        ${whyHTML(n)}
+        <div class="gbtns gtri">
+          <button type="button" class="f" id="gdTriEx"><b>⊘ Vyřadit z učení</b><span>přestane se objevovat</span><kbd>1</kbd></button>
+          <button type="button" class="t" id="gdTriKeep"><b>Nechat v učení</b><span>jen další otázka</span><kbd>2</kbd></button>
+        </div>
+      </div>`;
+    $('gdTriEx').onclick = () => triageDecide(true);
+    $('gdTriKeep').onclick = () => triageDecide(false);
+  }
+  function triageDecide(exclude) {
+    if (cur == null || !triage) return;
+    const n = cur;
+    if (exclude) { setExcl(n, true); if ($('gdOv') && $('gdOv').open) paintOverview(); }
+    if (queue) queue.shift();
+    nextCard();
   }
 
   /* Tapping an option answers right away as "sure"; the Tipuju toggle (per card) makes it a guess. */
@@ -731,6 +817,17 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
 
   function done() {
     cur = null;
+    if (triage) {
+      const nEx = all.filter(isExcl).length;
+      const w = (k, one, few, many) => k === 1 ? one : (k >= 2 && k <= 4 ? few : many);
+      cardEl.innerHTML = `<div class="gcard done"><div class="gst">Triáž hotová – prošla jsi ${queueTotal} ${w(queueTotal, 'otázku', 'otázky', 'otázek')}.</div>
+        <p class="gd-muted">Z chytrého učení je teď vyřazeno celkem ${nEx} ${w(nEx, 'otázka', 'otázky', 'otázek')}. Zobrazit a vrátit je můžeš v přehledu „Přehled, chyby a kalibrace“.</p>
+        <button type="button" class="pri" id="gdBack">Zpět na chytré učení</button></div>`;
+      triage = false; queue = null;
+      $('gdBack').onclick = () => setMode('smart');
+      paintSummary();
+      return;
+    }
     if (exam) {
       const pct = Math.round(exam.ok / exam.tot * 100);
       const list = exam.miss.map(([n, k]) => { const i = BY[n];
@@ -759,6 +856,11 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const k = e.key.toLowerCase();
     if (cur == null) return;
     const i = BY[cur];
+    if (triage) {
+      if (k === '1' || k === '+') { e.preventDefault(); triageDecide(true); }
+      else if (k === '2' || k === 'ě') { e.preventDefault(); triageDecide(false); }
+      return;
+    }
     if (!answered && i.t === 'm') {
       if (k in NUM) { const b = cardEl.querySelectorAll('.gopt')[NUM[k]]; if (b) { e.preventDefault(); pick(b.dataset.k); } }
       else if (k === ' ' || k === 'g') { e.preventDefault(); toggleGuess(); }
@@ -771,7 +873,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   });
 
   paintModes();
-  setMode(ui.mode === 'exam' || ui.mode === 'morning' ? 'smart' : ui.mode);
+  setMode(ui.mode === 'exam' || ui.mode === 'morning' || ui.mode === 'triage' ? 'smart' : ui.mode);
 })();
 
 </script>
