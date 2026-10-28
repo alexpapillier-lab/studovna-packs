@@ -54,6 +54,10 @@ details.gwhy[open]>div{margin:4px 0}
 .gqn>span:last-child{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .gexcl{border-radius:99px;border-style:dashed;padding:4px 12px;min-height:30px;font-size:.78rem;line-height:1;color:var(--muted);text-transform:none;letter-spacing:0}
 .gexcl:hover{color:var(--bad);border-color:var(--bad)}
+.gstar{border-radius:99px;border-style:dashed;padding:4px 10px;min-height:30px;font-size:.95rem;line-height:1;color:var(--muted);text-transform:none;letter-spacing:0}
+.gstar:hover{color:var(--t3);border-color:var(--t3)}
+.gstar.on{background:color-mix(in srgb,var(--t3) 18%,var(--surface));border-color:var(--t3);border-style:solid;color:var(--t3)}
+.gd-excl li .gd-unfav{margin-top:8px;border-radius:99px;padding:4px 14px;min-height:34px;font-size:.84rem}
 .gd-toast{position:sticky;bottom:12px;margin-top:12px;display:none;align-items:center;gap:12px;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:10px;font-size:.9rem;box-shadow:0 4px 18px rgba(0,0,0,.2)}
 .gd-toast.on{display:flex}
 .gd-toast button{background:transparent;color:var(--bg);border:1.5px solid color-mix(in srgb,var(--bg) 55%,transparent);border-radius:8px;padding:4px 12px;min-height:34px;font-size:.85rem}
@@ -451,7 +455,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
 (function () {
   const box = document.getElementById('drillbox');
   if (!box || typeof QZ === 'undefined') return;
-  const KEY = 'ch-mcq-v1', MKEY = 'ch-mcq-v1-meta', SKEY = 'ch-mcq-v1-snap', PKEY = 'ch-mcq-v1-prefs', NKEY = 'ch-mcq-v1-notes', XKEY = 'ch-mcq-v1-excl';
+  const KEY = 'ch-mcq-v1', MKEY = 'ch-mcq-v1-meta', SKEY = 'ch-mcq-v1-snap', PKEY = 'ch-mcq-v1-prefs', NKEY = 'ch-mcq-v1-notes', XKEY = 'ch-mcq-v1-excl', FKEY = 'ch-mcq-v1-fav', OKEY = 'ch-mcq-v1-key';
   const load = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
   const today = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
@@ -503,6 +507,19 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   const isExcl = n => !!excl[n];
   function setExcl(n, on) { if (on) excl[n] = Date.now(); else if (excl[n]) delete excl[n]; store(XKEY, excl); }
   const active = () => all.filter(n => !isExcl(n));   // the questions still in play
+  /* Favourites: { n: timestamp }. Starred questions keep showing in every mode (unlike excluded ones);
+     the "Oblíbené" mode and the overview list just them. Timestamped like notes so a sync keeps the newer. */
+  let fav = load(FKEY) || {};
+  const isFav = n => !!fav[n];
+  function setFav(n, on) { if (on) fav[n] = Date.now(); else if (fav[n]) delete fav[n]; store(FKEY, fav); }
+  /* Corrected correct answers (Quizlet data sometimes marks the wrong option): { n: { k: 'b', u: ts } }.
+     ORIGK keeps every question's original key so a correction can be reverted and so we know what's overridden.
+     Applied onto BY at startup, so the fix shows everywhere (learning, feedback, overview) and is permanent. */
+  const ORIGK = {}; QZ.forEach(i => { if (i.t === 'm') ORIGK[i.n] = i.k; });
+  let keyOv = load(OKEY) || {};
+  Object.keys(keyOv).forEach(n => { if (BY[n] && BY[n].t === 'm' && keyOv[n] && keyOv[n].k) BY[n].k = keyOv[n].k; });
+  const isKeyOv = n => !!(keyOv[n] && keyOv[n].k && keyOv[n].k !== ORIGK[n]);
+  function setKey(n, k) { keyOv[n] = { k, u: Date.now() }; store(OKEY, keyOv); if (BY[n]) BY[n].k = k; }
   if (prefs.cards === false) { prefs.kind = 'mcq'; delete prefs.cards; }   // older preference
   const SIBS = typeof SIB !== 'undefined' ? SIB : {};
   const sibs = n => SIBS[n] || [];
@@ -521,10 +538,10 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
 
   const ui = { mode: E.meta.mode || 'smart', chapters: E.meta.chapters || Object.keys(CHAP).slice(0, 1) };
   let cur = null, answered = false, shownAt = 0, autoT = null, queue = null, exam = null, queueTotal = 0, triage = false;
-  let picked = null, order = null, revealed = false, isReview = false, guess = false;
+  let picked = null, order = null, revealed = false, isReview = false, guess = false, editKey = false;
 
   /* ---------- layout ---------- */
-  const MODES = [['smart', 'Chytré učení'], ['weak', 'Jen moje slabiny'], ['morning', 'Včerejší chyby'], ['chapter', 'Kapitoly'], ['triage', 'Projít a vyřadit'], ['exclview', 'Vyřazené'], ['exam', 'Zkouška nanečisto']];
+  const MODES = [['smart', 'Chytré učení'], ['weak', 'Jen moje slabiny'], ['morning', 'Včerejší chyby'], ['chapter', 'Kapitoly'], ['triage', 'Projít a vyřadit'], ['fav', '★ Oblíbené'], ['exclview', 'Vyřazené'], ['exam', 'Zkouška nanečisto']];
   box.innerHTML = `
     <div class="gd-sum" id="gdSum"></div>
     <div class="gd-modes" role="tablist">${MODES.map(([k, l]) => `<button type="button" data-m="${k}">${l}</button>`).join('')}</div>
@@ -566,10 +583,13 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   paintKind();
 
   function pool() {
-    // "Vyřazené" mode drills exactly the excluded questions; every other mode leaves them out.
-    const p = ui.mode === 'exclview' ? all.filter(isExcl) : (ui.mode === 'chapter' ? ui.chapters.flatMap(c => CHAP[c] || []) : all);
+    // "Vyřazené" drills the excluded questions; "Oblíbené" drills the starred ones; both show all of their set.
+    // Every other mode leaves the excluded ones out.
+    const p = ui.mode === 'exclview' ? all.filter(isExcl)
+      : ui.mode === 'fav' ? all.filter(isFav)
+      : (ui.mode === 'chapter' ? ui.chapters.flatMap(c => CHAP[c] || []) : all);
     const q = prefs.kind === 'all' ? p : p.filter(n => BY[n].t === (prefs.kind === 'mcq' ? 'm' : 'o'));
-    return ui.mode === 'exclview' ? q : q.filter(n => !isExcl(n));
+    return (ui.mode === 'exclview' || ui.mode === 'fav') ? q : q.filter(n => !isExcl(n));
   }
 
   function setMode(m) {
@@ -624,6 +644,8 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const noteList = noted.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">📝 ${nl(noteOf(n))}</div></li>`).join('');
     const exNs = all.filter(isExcl).sort((x, y) => (excl[y] || 0) - (excl[x] || 0));
     const exList = exNs.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">${answerHTML(BY[n])}</div><button type="button" class="gd-restore" data-n="${n}">↩︎ Vrátit do učení</button></li>`).join('');
+    const favNs = all.filter(isFav).sort((x, y) => (fav[y] || 0) - (fav[x] || 0));
+    const favList = favNs.map(n => `<li><div class="h">★ #${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">${answerHTML(BY[n])}</div><button type="button" class="gd-unfav" data-n="${n}">☆ Odebrat z oblíbených</button></li>`).join('');
     $('gdOvBody').innerHTML = `
       <div class="gd-legend"><span><i class="m"></i>zvládnuto</span><span><i class="p"></i>rozpracováno</span><span><i class="u"></i>neviděno</span></div>
       ${bars}
@@ -633,11 +655,16 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       ${list ? `<ol class="gd-om">${list}</ol>` : '<p class="gd-muted">Zatím nic.</p>'}
       <h5>Moje poznámky (${noted.length})</h5>
       ${noteList ? `<ol class="gd-om">${noteList}</ol>` : '<p class="gd-muted">Zatím žádné – poznámku přidáš u otázky po odpovědi.</p>'}
+      <h5>★ Oblíbené (${favNs.length})</h5>
+      ${favList ? `<ol class="gd-om gd-excl">${favList}</ol>` : '<p class="gd-muted">Žádné – otázku přidáš hvězdičkou ☆ u otázky. Oblíbené zůstávají i v běžném učení a projdeš si je v režimu ★ Oblíbené.</p>'}
       <h5>Vyřazené z chytrého učení (${exNs.length})</h5>
       ${exList ? `${exNs.length > 1 ? '<div class="gd-exhdr"><button type="button" id="gdRestoreAll">Vrátit všechny do učení</button></div>' : ''}<ol class="gd-om gd-excl">${exList}</ol>` : '<p class="gd-muted">Žádné – otázku vyřadíš tlačítkem „⊘ Vyřadit z učení“ přímo u otázky.</p>'}
       <div class="gd-reset"><button type="button" id="gdResetDay">Vynulovat jen dnešní sezení</button><button type="button" id="gdResetAll" class="danger">Smazat celý postup</button></div>`;
     $('gdOvBody').querySelectorAll('.gd-restore').forEach(b => b.onclick = () => {
       setExcl(+b.dataset.n, false); paintOverview(); paintSummary();
+    });
+    $('gdOvBody').querySelectorAll('.gd-unfav').forEach(b => b.onclick = () => {
+      setFav(+b.dataset.n, false); paintOverview(); paintSummary();
     });
     if ($('gdRestoreAll')) confirmBtn($('gdRestoreAll'), 'Opravdu vrátit všechny? Klikni znovu', () => {
       exNs.forEach(n => setExcl(n, false)); paintOverview(); paintSummary();
@@ -681,7 +708,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   }
 
   function nextCard() {
-    clearTimeout(autoT); answered = false; picked = null; order = null; revealed = false; isReview = false; guess = false; cardSerial++;
+    clearTimeout(autoT); answered = false; picked = null; order = null; revealed = false; isReview = false; guess = false; editKey = false; cardSerial++;
     paintSummary();
     let n = null;
     const p = pool();
@@ -715,13 +742,15 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const exclHTML = exam ? '' : (ui.mode === 'exclview'
       ? `<button type="button" class="gexcl" id="gdExcl" title="Vrátit otázku zpět do chytrého učení">↩︎ Vrátit do učení</button>`
       : `<button type="button" class="gexcl" id="gdExcl" title="Otázka se přestane objevovat v chytrém učení; vrátit ji jde v přehledu nebo v režimu Vyřazené">⊘ Vyřadit z učení</button>`);
+    // Star = oblíbené. Favourites keep showing in every mode; the "★ Oblíbené" mode lists just them.
+    const favHTML = exam ? '' : `<button type="button" class="gstar${isFav(n) ? ' on' : ''}" id="gdStar" aria-pressed="${isFav(n)}" title="${isFav(n) ? 'Odebrat z oblíbených' : 'Přidat do oblíbených'}">${isFav(n) ? '★' : '☆'}</button>`;
     if (i.t === 'm') {
       // Display order: shuffled when the preference is on; letters are re-assigned so the card always reads a)–d).
       if (!order) order = prefs.shuffle ? shuffled(i.o.map((_, x) => x)) : i.o.map((_, x) => x);
       const opts = order.map((oi, pos) => `<button type="button" class="gopt" data-k="${esc(i.o[oi][0])}"><b>${LETTERS[pos]})</b> <span>${esc(i.o[oi][1])}</span><kbd>${pos + 1}</kbd></button>`).join('');
       cardEl.innerHTML = `
-        <div class="gcard">
-          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${noteOf(n) ? ' · 📝' : ''}</span><span>${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
+        <div class="gcard" data-stv-key="q${n}">
+          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${noteOf(n) ? ' · 📝' : ''}</span><span>${favHTML}${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
           <div class="gst">${nl(i.q)}</div>
           ${cfg ? '' : `<button type="button" class="gguess${guess ? ' on' : ''}" id="gdGuess">${guess ? '✓ Tipuju – odpověď se počítá jako neumím' : 'Tipuju (nejsem si jistá)'}<kbd></kbd></button>`}
           <div class="gopts">${opts}</div>
@@ -731,14 +760,30 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       cardEl.querySelectorAll('.gopt').forEach(b => b.onclick = () => pick(b.dataset.k));
     } else {
       cardEl.innerHTML = `
-        <div class="gcard">
-          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])} · <span class="gtag">kartička</span></span><span>${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
+        <div class="gcard" data-stv-key="q${n}">
+          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])} · <span class="gtag">kartička</span></span><span>${favHTML}${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
           <div class="gst">${nl(i.q)}</div>
           <div class="gslot"><button type="button" class="pri gnext" id="gdReveal">Ukázat odpověď ⏎</button></div>
         </div>`;
       $('gdReveal').onclick = reveal;
     }
     const xb = $('gdExcl'); if (xb) xb.onclick = ui.mode === 'exclview' ? restoreCurrent : excludeCurrent;
+    const sb = $('gdStar'); if (sb) sb.onclick = toggleFav;
+  }
+
+  /* Star / un-star the current question. Favourites keep showing everywhere; only in the "Oblíbené" mode does
+     un-starring drop the card and move on (it just left that list). Saved immediately, so it is permanent. */
+  function toggleFav() {
+    if (cur == null) return;
+    const n = cur, on = !isFav(n);
+    setFav(n, on);
+    const sb = $('gdStar');
+    if (sb) { sb.classList.toggle('on', on); sb.textContent = on ? '★' : '☆'; sb.title = on ? 'Odebrat z oblíbených' : 'Přidat do oblíbených'; sb.setAttribute('aria-pressed', on); }
+    if ($('gdOv') && $('gdOv').open) paintOverview();
+    if (!on && ui.mode === 'fav') {
+      toast(`Otázka #${n} odebrána z oblíbených.`, 'Vrátit', () => { setFav(n, true); paintSummary(); if ($('gdOv') && $('gdOv').open) paintOverview(); });
+      nextCard();
+    }
   }
 
   /* In the "Vyřazené" mode: bring the current question back into learning and move on. */
@@ -785,7 +830,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const n = cur, i = BY[n];
     const prog = `${queueTotal - queue.length + 1} / ${queueTotal}`;
     cardEl.innerHTML = `
-      <div class="gcard">
+      <div class="gcard" data-stv-key="q${n}">
         <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${i.t === 'o' ? ' · <span class="gtag">kartička</span>' : ''}${noteOf(n) ? ' · 📝' : ''}</span><span>triáž · ${prog}</span></div>
         <div class="gst">${nl(i.q)}</div>
         <div class="gv ans"><b>Odpověď</b>${answerHTML(i)}</div>
@@ -903,6 +948,16 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       paintSummary();
       return;
     }
+    if (ui.mode === 'fav') {
+      const nF = all.filter(isFav).length;
+      const msg = nF ? 'Oblíbené otázky máš pro teď projité. Hvězdičkou ★ u otázky je přidáváš i odebíráš.'
+        : 'Zatím nemáš žádné oblíbené. Přidáš je hvězdičkou ☆ u otázky – pak se tu objeví (a zůstávají i v běžném učení).';
+      cardEl.innerHTML = `<div class="gcard done"><div class="gst">${msg}</div><button type="button" class="pri" id="gdBack">Zpět na chytré učení</button></div>`;
+      queue = null;
+      $('gdBack').onclick = () => setMode('smart');
+      paintSummary();
+      return;
+    }
     if (exam) {
       const pct = Math.round(exam.ok / exam.tot * 100);
       const list = exam.miss.map(([n, k]) => { const i = BY[n];
@@ -949,7 +1004,7 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   });
 
   paintModes();
-  setMode(['exam', 'morning', 'triage', 'exclview'].includes(ui.mode) ? 'smart' : ui.mode);
+  setMode(['exam', 'morning', 'triage', 'exclview', 'fav'].includes(ui.mode) ? 'smart' : ui.mode);
 })();
 
 </script>
