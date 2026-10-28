@@ -38,6 +38,15 @@ button:disabled{cursor:default}
 .gnote summary{cursor:pointer;font-size:.9rem;color:var(--muted);min-height:28px;display:flex;align-items:center}
 .gnote[open] summary{color:var(--fg)}
 .gnote textarea{display:block;width:100%;margin-top:8px;font:inherit;font-size:.95rem;line-height:1.45;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);resize:vertical}
+.gnote-add{display:inline-flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;font-size:.86rem;color:var(--accent);border:1px dashed var(--line);border-radius:8px;padding:6px 12px;min-height:36px}
+.gnote-add:hover{border-color:var(--accent)}
+.gnote-img:not(:empty){margin-top:8px}
+.gnote-pic{display:block;max-width:100%;max-height:320px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in}
+.gnote-imgdel{display:block;margin-top:6px;border-radius:8px;padding:4px 10px;min-height:32px;font-size:.82rem}
+.gnote-ovpic{max-height:200px}
+.gd-imgov{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:20px;cursor:zoom-out}
+.gd-imgov.on{display:flex}
+.gd-imgov img{max-width:100%;max-height:100%;border-radius:8px}
 .gd-today b{color:var(--fg)}
 .gd-pref input{width:20px;height:20px}
 .gwhy{margin-top:10px;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--fg) 12%,transparent);font-size:.93rem;line-height:1.5;display:flex;flex-direction:column;gap:5px}
@@ -57,7 +66,16 @@ details.gwhy[open]>div{margin:4px 0}
 .gstar{border-radius:99px;border-style:dashed;padding:4px 10px;min-height:30px;font-size:.95rem;line-height:1;color:var(--muted);text-transform:none;letter-spacing:0}
 .gstar:hover{color:var(--t3);border-color:var(--t3)}
 .gstar.on{background:color-mix(in srgb,var(--t3) 18%,var(--surface));border-color:var(--t3);border-style:solid;color:var(--t3)}
-.gd-excl li .gd-unfav{margin-top:8px;border-radius:99px;padding:4px 14px;min-height:34px;font-size:.84rem}
+.gkey{border-radius:99px;border-style:dashed;padding:4px 10px;min-height:30px;font-size:.78rem;line-height:1;color:var(--muted);text-transform:none;letter-spacing:0}
+.gkey:hover{color:var(--accent);border-color:var(--accent)}
+.gkey.on{background:color-mix(in srgb,var(--accent) 16%,var(--surface));border-color:var(--accent);border-style:solid;color:var(--accent)}
+.gkey.ov{color:var(--good);border-color:color-mix(in srgb,var(--good) 55%,var(--line))}
+.gkeyedit{font-size:.9rem;color:var(--fg);background:color-mix(in srgb,var(--accent) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.gkeyedit button{border-radius:8px;padding:4px 12px;min-height:34px;font-size:.84rem}
+.gopts.editing .gopt{cursor:pointer;border-style:dashed}
+.gopts.editing .gopt:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
+.gopts.editing .gopt.iscorrect{border-style:solid;border-color:var(--good);background:color-mix(in srgb,var(--good) 14%,var(--surface))}
+.gd-excl li .gd-unfav,.gd-excl li .gd-unov{margin-top:8px;border-radius:99px;padding:4px 14px;min-height:34px;font-size:.84rem}
 .gd-toast{position:sticky;bottom:12px;margin-top:12px;display:none;align-items:center;gap:12px;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:10px;font-size:.9rem;box-shadow:0 4px 18px rgba(0,0,0,.2)}
 .gd-toast.on{display:flex}
 .gd-toast button{background:transparent;color:var(--bg);border:1.5px solid color-mix(in srgb,var(--bg) 55%,transparent);border-radius:8px;padding:4px 12px;min-height:34px;font-size:.85rem}
@@ -490,15 +508,62 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
   let notes = load(NKEY) || {};
   const noteOf = n => (notes[n] && notes[n].t) || '';
   function setNote(n, t) { t = t.trim(); if (t) notes[n] = { t, u: Date.now() }; else if (notes[n]) notes[n] = { t: '', u: Date.now() }; store(NKEY, notes); }
+  /* An optional picture per note lives in its own key ('ch-mcq-v1-img-<n>' = { d: dataURL, u }), so one big photo
+     never bloats the shared notes blob and each stays under the sync size limit. Downscaled to ≤1200 px JPEG. */
+  const imgKeyOf = n => 'ch-mcq-v1-img-' + n;
+  const imgOf = n => { const v = load(imgKeyOf(n)); return (v && v.d) || ''; };
+  function setImg(n, d) { store(imgKeyOf(n), { d: d || '', u: Date.now() }); }
+  const hasNote = n => !!(noteOf(n) || imgOf(n));
+  const imgBoxHTML = n => { const d = imgOf(n); return d ? `<img src="${d}" alt="obrázek k poznámce" class="gnote-pic"><button type="button" class="gnote-imgdel">× Odebrat obrázek</button>` : ''; };
   function noteBox(n) {
-    const t = noteOf(n);
-    return `<details class="gnote"${t ? ' open' : ''}><summary>${t ? '📝 Poznámka' : '＋ Poznámka k otázce'}</summary>
-      <textarea placeholder="Co si k tomu zapamatovat, mnemotechnika, proč je to tak…" rows="3">${esc(t)}</textarea></details>`;
+    const t = noteOf(n), has = hasNote(n);
+    return `<details class="gnote"${has ? ' open' : ''}><summary>${has ? '📝 Poznámka' : '＋ Poznámka k otázce'}</summary>
+      <textarea placeholder="Co si k tomu zapamatovat, mnemotechnika, proč je to tak…" rows="3">${esc(t)}</textarea>
+      <div class="gnote-img">${imgBoxHTML(n)}</div>
+      <label class="gnote-add">＋ Přidat obrázek<input type="file" accept="image/*" hidden></label></details>`;
   }
   function wireNote(root, n) {
-    const ta = root.querySelector('.gnote textarea'); if (!ta) return;
-    let t; ta.oninput = () => { clearTimeout(t); t = setTimeout(() => setNote(n, ta.value), 400); };
-    ta.onblur = () => { clearTimeout(t); setNote(n, ta.value); };
+    const ta = root.querySelector('.gnote textarea');
+    if (ta) { let t; ta.oninput = () => { clearTimeout(t); t = setTimeout(() => setNote(n, ta.value), 400); }; ta.onblur = () => { clearTimeout(t); setNote(n, ta.value); }; }
+    const file = root.querySelector('.gnote-add input[type=file]');
+    if (file) file.onchange = () => { const f = file.files && file.files[0]; if (f) addNoteImg(root, n, f); file.value = ''; };
+    wireNoteImg(root, n);
+  }
+  function wireNoteImg(root, n) {
+    const del = root.querySelector('.gnote-imgdel'); if (del) del.onclick = () => { setImg(n, ''); refreshNoteImg(root, n); };
+    const im = root.querySelector('.gnote-pic'); if (im) im.onclick = () => openImg(im.src);
+  }
+  function refreshNoteImg(root, n) {
+    const b = root.querySelector('.gnote-img'); if (!b) return;
+    b.innerHTML = imgBoxHTML(n); wireNoteImg(root, n);
+    const sum = root.querySelector('.gnote > summary'); if (sum) sum.textContent = hasNote(n) ? '📝 Poznámka' : '＋ Poznámka k otázce';
+  }
+  /* Downscale to ≤1200 px and store as JPEG; drop quality further if it would exceed the sync size limit. */
+  function addNoteImg(root, n, f) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        const MAX = 1200; let w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+        if (w > MAX || h > MAX) { const s = Math.min(MAX / w, MAX / h); w = Math.round(w * s); h = Math.round(h * s); }
+        let url;
+        try { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
+          url = c.toDataURL('image/jpeg', 0.72);
+          if (url.length > 1400000) url = c.toDataURL('image/jpeg', 0.5);
+        } catch (e) { url = reader.result; }
+        if (url.length > 1900000) { alert('Obrázek je i po zmenšení moc velký – zkus menší nebo oříznutý.'); return; }
+        setImg(n, url); refreshNoteImg(root, n);
+      };
+      im.onerror = () => { setImg(n, reader.result); refreshNoteImg(root, n); };
+      im.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+  }
+  /* Tap a note picture to see it full-size. */
+  function openImg(src) {
+    let ov = document.getElementById('gdImgOv');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'gdImgOv'; ov.className = 'gd-imgov'; document.body.appendChild(ov); ov.onclick = () => ov.classList.remove('on'); }
+    ov.innerHTML = `<img src="${src}" alt="">`; ov.classList.add('on');
   }
   /* Questions the user has taken out of smart learning: { n: timestamp } (timestamped like notes so a sync
      keeps the newer state). Excluded questions never show up in any practice mode; they can be seen and
@@ -640,12 +705,15 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       return `<li class="${it.m ? 'done' : ''}"><div class="h">#${n} ${it.om ? '<span class="gtag om">omyl</span>' : ''} ${it.w ? `${it.w}× špatně` : 'tipnuto'} ${it.m ? '<span class="ok">✓ už zvládnuto</span>' : ''}</div>
         <div class="t">${esc(i.q)}</div><div class="x">${answerHTML(i)}</div>${whyHTML(n, false)}${noteOf(n) ? `<div class="x">📝 ${nl(noteOf(n))}</div>` : ''}</li>`;
     }).join('');
-    const noted = all.filter(n => noteOf(n));
-    const noteList = noted.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">📝 ${nl(noteOf(n))}</div></li>`).join('');
+    const noted = all.filter(hasNote);
+    const noteList = noted.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div>${noteOf(n) ? `<div class="x">📝 ${nl(noteOf(n))}</div>` : ''}${imgOf(n) ? `<div class="x"><img src="${imgOf(n)}" alt="obrázek k poznámce" class="gnote-pic gnote-ovpic"></div>` : ''}</li>`).join('');
     const exNs = all.filter(isExcl).sort((x, y) => (excl[y] || 0) - (excl[x] || 0));
     const exList = exNs.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">${answerHTML(BY[n])}</div><button type="button" class="gd-restore" data-n="${n}">↩︎ Vrátit do učení</button></li>`).join('');
     const favNs = all.filter(isFav).sort((x, y) => (fav[y] || 0) - (fav[x] || 0));
     const favList = favNs.map(n => `<li><div class="h">★ #${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">${answerHTML(BY[n])}</div><button type="button" class="gd-unfav" data-n="${n}">☆ Odebrat z oblíbených</button></li>`).join('');
+    const ovNs = all.filter(isKeyOv).sort((x, y) => (keyOv[y].u || 0) - (keyOv[x].u || 0));
+    const txt = (n, kk) => ((BY[n].o.find(o => o[0] === kk) || [])[1] || '').trim();
+    const ovList = ovNs.map(n => `<li><div class="h">#${n} · ${esc(CHN[E.chOf[n]])}</div><div class="t">${esc(BY[n].q)}</div><div class="x">Teď správně: <b>${esc(BY[n].k)}) ${esc(txt(n, BY[n].k))}</b></div><div class="x gd-muted">V importu bylo: ${esc(ORIGK[n])}) ${esc(txt(n, ORIGK[n]))}</div><button type="button" class="gd-unov" data-n="${n}">↩︎ Vrátit původní odpověď</button></li>`).join('');
     $('gdOvBody').innerHTML = `
       <div class="gd-legend"><span><i class="m"></i>zvládnuto</span><span><i class="p"></i>rozpracováno</span><span><i class="u"></i>neviděno</span></div>
       ${bars}
@@ -659,6 +727,8 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       ${favList ? `<ol class="gd-om gd-excl">${favList}</ol>` : '<p class="gd-muted">Žádné – otázku přidáš hvězdičkou ☆ u otázky. Oblíbené zůstávají i v běžném učení a projdeš si je v režimu ★ Oblíbené.</p>'}
       <h5>Vyřazené z chytrého učení (${exNs.length})</h5>
       ${exList ? `${exNs.length > 1 ? '<div class="gd-exhdr"><button type="button" id="gdRestoreAll">Vrátit všechny do učení</button></div>' : ''}<ol class="gd-om gd-excl">${exList}</ol>` : '<p class="gd-muted">Žádné – otázku vyřadíš tlačítkem „⊘ Vyřadit z učení“ přímo u otázky.</p>'}
+      <h5>Opravené správné odpovědi (${ovNs.length})</h5>
+      ${ovList ? `<ol class="gd-om gd-excl">${ovList}</ol>` : '<p class="gd-muted">Žádné – u otázky a)–d) můžeš tlačítkem „✎ Správná“ přeznačit, která odpověď je správná (když má import chybu).</p>'}
       <div class="gd-reset"><button type="button" id="gdResetDay">Vynulovat jen dnešní sezení</button><button type="button" id="gdResetAll" class="danger">Smazat celý postup</button></div>`;
     $('gdOvBody').querySelectorAll('.gd-restore').forEach(b => b.onclick = () => {
       setExcl(+b.dataset.n, false); paintOverview(); paintSummary();
@@ -666,6 +736,10 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     $('gdOvBody').querySelectorAll('.gd-unfav').forEach(b => b.onclick = () => {
       setFav(+b.dataset.n, false); paintOverview(); paintSummary();
     });
+    $('gdOvBody').querySelectorAll('.gd-unov').forEach(b => b.onclick = () => {
+      const n = +b.dataset.n; setKey(n, ORIGK[n]); if (cur === n) paintCard(); paintOverview(); paintSummary();
+    });
+    $('gdOvBody').querySelectorAll('.gnote-ovpic').forEach(im => im.onclick = () => openImg(im.src));
     if ($('gdRestoreAll')) confirmBtn($('gdRestoreAll'), 'Opravdu vrátit všechny? Klikni znovu', () => {
       exNs.forEach(n => setExcl(n, false)); paintOverview(); paintSummary();
     });
@@ -744,20 +818,26 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
       : `<button type="button" class="gexcl" id="gdExcl" title="Otázka se přestane objevovat v chytrém učení; vrátit ji jde v přehledu nebo v režimu Vyřazené">⊘ Vyřadit z učení</button>`);
     // Star = oblíbené. Favourites keep showing in every mode; the "★ Oblíbené" mode lists just them.
     const favHTML = exam ? '' : `<button type="button" class="gstar${isFav(n) ? ' on' : ''}" id="gdStar" aria-pressed="${isFav(n)}" title="${isFav(n) ? 'Odebrat z oblíbených' : 'Přidat do oblíbených'}">${isFav(n) ? '★' : '☆'}</button>`;
+    // "Opravit správnou odpověď" – only for a)–d) questions (where the imported data can be wrong). Opens an edit mode.
+    const keyHTML = (exam || i.t !== 'm') ? '' : `<button type="button" class="gkey${editKey ? ' on' : ''}${isKeyOv(n) ? ' ov' : ''}" id="gdKey" title="Opravit, která odpověď je správná">✎ Správná${isKeyOv(n) ? ' ✓' : ''}</button>`;
     if (i.t === 'm') {
       // Display order: shuffled when the preference is on; letters are re-assigned so the card always reads a)–d).
       if (!order) order = prefs.shuffle ? shuffled(i.o.map((_, x) => x)) : i.o.map((_, x) => x);
       const opts = order.map((oi, pos) => `<button type="button" class="gopt" data-k="${esc(i.o[oi][0])}"><b>${LETTERS[pos]})</b> <span>${esc(i.o[oi][1])}</span><kbd>${pos + 1}</kbd></button>`).join('');
       cardEl.innerHTML = `
         <div class="gcard" data-stv-key="q${n}">
-          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${noteOf(n) ? ' · 📝' : ''}</span><span>${favHTML}${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
+          <div class="gqn"><span>#${n} · ${esc(CHN[E.chOf[n]])}${hasNote(n) ? ' · 📝' : ''}</span><span>${favHTML}${keyHTML}${exclHTML}${exam ? '' : `<span class="gtag ${tag[1]}">${tag[0]}</span>`} ${prog}</span></div>
           <div class="gst">${nl(i.q)}</div>
-          ${cfg ? '' : `<button type="button" class="gguess${guess ? ' on' : ''}" id="gdGuess">${guess ? '✓ Tipuju – odpověď se počítá jako neumím' : 'Tipuju (nejsem si jistá)'}<kbd></kbd></button>`}
-          <div class="gopts">${opts}</div>
+          ${editKey ? `<div class="gkeyedit">Klikni na správnou odpověď (oprava importu). Teď označená: <b>${esc(i.k)})</b> <button type="button" id="gdKeyCancel">Zrušit</button></div>` : (cfg ? '' : `<button type="button" class="gguess${guess ? ' on' : ''}" id="gdGuess">${guess ? '✓ Tipuju – odpověď se počítá jako neumím' : 'Tipuju (nejsem si jistá)'}<kbd></kbd></button>`)}
+          <div class="gopts${editKey ? ' editing' : ''}">${opts}</div>
           <div class="gslot"></div>
         </div>`;
       if ($('gdGuess')) $('gdGuess').onclick = toggleGuess;
-      cardEl.querySelectorAll('.gopt').forEach(b => b.onclick = () => pick(b.dataset.k));
+      if ($('gdKeyCancel')) $('gdKeyCancel').onclick = () => { editKey = false; paintCard(); };
+      cardEl.querySelectorAll('.gopt').forEach(b => {
+        if (editKey && b.dataset.k === i.k) b.classList.add('iscorrect');
+        b.onclick = () => editKey ? setCorrect(b.dataset.k) : pick(b.dataset.k);
+      });
     } else {
       cardEl.innerHTML = `
         <div class="gcard" data-stv-key="q${n}">
@@ -769,6 +849,30 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     }
     const xb = $('gdExcl'); if (xb) xb.onclick = ui.mode === 'exclview' ? restoreCurrent : excludeCurrent;
     const sb = $('gdStar'); if (sb) sb.onclick = toggleFav;
+    const kb = $('gdKey'); if (kb) kb.onclick = toggleEditKey;
+  }
+
+  /* Enter/leave "fix the correct answer" mode for the current a)–d) card. Not while it's already answered. */
+  function toggleEditKey() {
+    if (cur == null || answered || BY[cur].t !== 'm') return;
+    editKey = !editKey;
+    paintCard();
+  }
+
+  /* Mark option `k` as the correct one for the current question. Permanent (saved in OKEY) and applied to BY,
+     so learning grades against it and every later view shows it. Setting it back to the imported key clears the fix. */
+  function setCorrect(k) {
+    const n = cur, i = BY[n];
+    if (!i || i.t !== 'm') return;
+    setKey(n, k);
+    editKey = false;
+    paintCard();
+    if ($('gdOv') && $('gdOv').open) paintOverview();
+    const label = ((i.o.find(o => o[0] === k) || [])[1] || '').trim();
+    const changed = k !== ORIGK[n];
+    toast(`Správná odpověď u #${n} je teď ${k})${label ? ' ' + label.slice(0, 48) : ''}.`,
+      changed ? 'Vrátit na původní' : null,
+      changed ? () => { setKey(n, ORIGK[n]); if (cur === n) paintCard(); if ($('gdOv') && $('gdOv').open) paintOverview(); } : null);
   }
 
   /* Star / un-star the current question. Favourites keep showing everywhere; only in the "Oblíbené" mode does
@@ -986,6 +1090,11 @@ const EX={"1":"Elektivní řešení infrarenálního AAA je indikováno při pr�
     const k = e.key.toLowerCase();
     if (cur == null) return;
     const i = BY[cur];
+    if (editKey) {   // fixing the correct answer: digits mark the right option, Esc cancels
+      if (k === 'escape') { e.preventDefault(); editKey = false; paintCard(); }
+      else if (k in NUM) { const b = cardEl.querySelectorAll('.gopt')[NUM[k]]; if (b) { e.preventDefault(); setCorrect(b.dataset.k); } }
+      return;
+    }
     if (triage) {
       if (k === '1' || k === '+') { e.preventDefault(); triageDecide(true); }
       else if (k === '2' || k === 'ě') { e.preventDefault(); triageDecide(false); }
